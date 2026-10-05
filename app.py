@@ -64,8 +64,8 @@ from trade_simulator import (
     calculate_path_loss,
     simulate_p2p_trade_cycle,
     generate_executive_report_bundle,
-    DEFAULT_UTILITY_TARIFF_USD,
-    DEFAULT_P2P_TARIFF_USD
+    DEFAULT_UTILITY_TARIFF_INR,
+    DEFAULT_P2P_TARIFF_INR
 )
 
 # -----------------------------------------------------------------------------
@@ -1103,14 +1103,14 @@ with tab_trade:
     col_sim_ctrl1, col_sim_ctrl2, col_sim_ctrl3 = st.columns([3.5, 3.5, 3], vertical_alignment="bottom")
     with col_sim_ctrl1:
         utility_rate = st.number_input(
-            "Grid Utility Tariff ($/kWh):",
-            min_value=0.01, max_value=1.00, value=0.12, step=0.01,
-            help="Standard retail electricity cost (~ ₹10.00/kWh in Navi Mumbai/MSEDCL)"
+            "Grid Utility Tariff (₹/kWh):",
+            min_value=1.00, max_value=30.00, value=float(DEFAULT_UTILITY_TARIFF_INR), step=0.50,
+            help="Standard retail electricity cost (~ ₹10.00/kWh in Navi Mumbai / MSEDCL)"
         )
     with col_sim_ctrl2:
         p2p_rate = st.number_input(
-            "P2P Microgrid Tariff ($/kWh):",
-            min_value=0.01, max_value=1.00, value=0.06, step=0.01,
+            "P2P Microgrid Tariff (₹/kWh):",
+            min_value=1.00, max_value=30.00, value=float(DEFAULT_P2P_TARIFF_INR), step=0.50,
             help="Community solar trading rate (~ ₹5.00/kWh in Navi Mumbai)"
         )
     with col_sim_ctrl3:
@@ -1120,8 +1120,8 @@ with tab_trade:
     if btn_simulate or st.session_state["trade_sim_results"] is None:
         st.session_state["trade_sim_results"] = simulate_p2p_trade_cycle(
             G=G,
-            utility_rate_usd=utility_rate,
-            p2p_rate_usd=p2p_rate
+            utility_rate_inr=utility_rate,
+            p2p_rate_inr=p2p_rate
         )
 
     trade_res = st.session_state["trade_sim_results"]
@@ -1169,8 +1169,8 @@ with tab_trade:
             st.markdown(f"""
             <div class="metric-card-container">
                 <div class="kpi-title">Simulated Cost Savings</div>
-                <div class="kpi-val" style="color: #38bdf8;">${trade_res['total_savings_usd']:.2f}</div>
-                <div class="kpi-sub">₹{trade_res['total_savings_inr']:.2f} (Navi Mumbai)</div>
+                <div class="kpi-val" style="color: #38bdf8;">₹{trade_res['total_savings_inr']:.2f}</div>
+                <div class="kpi-sub">Navi Mumbai / MSEDCL Tariff Savings</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1217,7 +1217,7 @@ with tab_trade:
                 st.markdown(f"- Topological Hops: **{path_details['hops']}**")
                 st.markdown(f"- Cumulative Efficiency Multiplier $\\prod(1 - \\text{{loss}}_i)$: **{path_details['efficiency_multiplier']:.4f}**")
                 st.markdown(f"- Total Path Dissipation: **{path_details['total_loss_pct']:.2f}%**")
-                st.markdown(f"- Financial Benefit: **${sel_txn['Cost Savings ($)']} (₹{sel_txn['Cost Savings (₹)']})**")
+                st.markdown(f"- Financial Benefit: **₹{sel_txn['Cost Savings (₹)']}**")
             with insp_c2:
                 hop_rows = []
                 for h_idx in range(len(path_nodes) - 1):

@@ -29,10 +29,12 @@ from closure_engine import compute_transitive_closure
 from grid_presets import graph_to_adjacency_matrix
 
 
-# Default tariff rates (standardized for both USD and Navi Mumbai / MSEDCL INR)
+# Default tariff rates (standardized for Navi Mumbai / MSEDCL INR and USD)
+DEFAULT_UTILITY_TARIFF_INR = 10.00  # ₹ / kWh baseline MSEDCL grid rate in Navi Mumbai
+DEFAULT_P2P_TARIFF_INR = 5.00       # ₹ / kWh peer-to-peer microgrid rate
 DEFAULT_UTILITY_TARIFF_USD = 0.12   # $ / kWh baseline grid rate (~ ₹10.00/kWh)
 DEFAULT_P2P_TARIFF_USD = 0.06       # $ / kWh peer-to-peer microgrid rate (~ ₹5.00/kWh)
-USD_TO_INR_RATE = 83.50             # Currency multiplier for local Navi Mumbai display
+USD_TO_INR_RATE = 83.50             # Currency multiplier for conversion
 
 
 def calculate_path_loss(
@@ -94,8 +96,10 @@ def calculate_path_loss(
 
 def simulate_p2p_trade_cycle(
     G: nx.DiGraph,
-    utility_rate_usd: float = DEFAULT_UTILITY_TARIFF_USD,
-    p2p_rate_usd: float = DEFAULT_P2P_TARIFF_USD
+    utility_rate_inr: float = DEFAULT_UTILITY_TARIFF_INR,
+    p2p_rate_inr: float = DEFAULT_P2P_TARIFF_INR,
+    utility_rate_usd: Optional[float] = None,
+    p2p_rate_usd: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Simulates a peer-to-peer rooftop solar trade cycle across the microgrid.
@@ -175,7 +179,14 @@ def simulate_p2p_trade_cycle(
     transactions = []
     txn_id_counter = 1
 
-    unit_savings_usd = max(utility_rate_usd - p2p_rate_usd, 0.0)
+    # Handle backward-compatibility for USD parameters if passed
+    if utility_rate_usd is not None and utility_rate_inr == DEFAULT_UTILITY_TARIFF_INR:
+        utility_rate_inr = utility_rate_usd * USD_TO_INR_RATE
+    if p2p_rate_usd is not None and p2p_rate_inr == DEFAULT_P2P_TARIFF_INR:
+        p2p_rate_inr = p2p_rate_usd * USD_TO_INR_RATE
+
+    unit_savings_inr = max(utility_rate_inr - p2p_rate_inr, 0.0)
+    unit_savings_usd = unit_savings_inr / USD_TO_INR_RATE
 
     for cand in candidate_pairs:
         u = cand["source"]
@@ -206,9 +217,9 @@ def simulate_p2p_trade_cycle(
         remaining_surplus[u] = max(0.0, remaining_surplus[u] - sent_kw)
         remaining_demand[v] = max(0.0, remaining_demand[v] - delivered_kw)
 
-        # Economic savings for delivered clean energy
+        # Economic savings for delivered clean energy in Rupees (₹)
+        savings_inr = delivered_kw * unit_savings_inr
         savings_usd = delivered_kw * unit_savings_usd
-        savings_inr = savings_usd * USD_TO_INR_RATE
 
         path_str = " ➔ ".join(cand["path"])
         status = "⚠️ Inefficient (>3 hops)" if cand["is_inefficient"] else "✅ Optimal"
@@ -225,8 +236,8 @@ def simulate_p2p_trade_cycle(
             "Delivered (kW)": round(delivered_kw, 2),
             "Loss (kW)": round(loss_kw, 2),
             "Efficiency (%)": round(eta * 100.0, 1),
-            "Cost Savings ($)": round(savings_usd, 2),
             "Cost Savings (₹)": round(savings_inr, 2),
+            "Cost Savings ($)": round(savings_usd, 2),
             "Status": status,
             "is_inefficient": cand["is_inefficient"]
         }
@@ -240,7 +251,7 @@ def simulate_p2p_trade_cycle(
         ledger_df = pd.DataFrame(columns=[
             "Txn ID", "Exporter ID", "Exporter Name", "Importer ID", "Importer Name",
             "Routing Path", "Hops", "Sent (kW)", "Delivered (kW)", "Loss (kW)",
-            "Efficiency (%)", "Cost Savings ($)", "Cost Savings (₹)", "Status"
+            "Efficiency (%)", "Cost Savings (₹)", "Cost Savings ($)", "Status"
         ])
 
     total_sent_kw = round(sum(t["Sent (kW)"] for t in transactions), 2)
@@ -339,15 +350,15 @@ def generate_executive_report_bundle(
     # Section 5: P2P Trade Settlement Transaction Ledger
     buffer.write("=== SECTION 5: P2P TRADE SETTLEMENT TRANSACTION LEDGER ===\n")
     if trade_results and trade_results.get("transactions"):
-        buffer.write(f"Summary: Total Traded: {trade_results.get('total_sent_kw', 0)} kW | Total Delivered: {trade_results.get('total_delivered_kw', 0)} kW | Total Losses: {trade_results.get('total_loss_kw', 0)} kW | Efficiency: {trade_results.get('grid_efficiency_pct', 0)}% | Total Savings: ${trade_results.get('total_savings_usd', 0)} (INR {trade_results.get('total_savings_inr', 0)})\n")
-        buffer.write("Txn ID,Exporter ID,Exporter Name,Importer ID,Importer Name,Routing Path,Hops,Sent (kW),Delivered (kW),Loss (kW),Efficiency (%),Cost Savings ($),Cost Savings (INR),Status\n")
+        buffer.write(f"Summary: Total Traded: {trade_results.get('total_sent_kw', 0)} kW | Total Delivered: {trade_results.get('total_delivered_kw', 0)} kW | Total Losses: {trade_results.get('total_loss_kw', 0)} kW | Efficiency: {trade_results.get('grid_efficiency_pct', 0)}% | Total Savings: INR {trade_results.get('total_savings_inr', 0)} (USD {trade_results.get('total_savings_usd', 0)})\n")
+        buffer.write("Txn ID,Exporter ID,Exporter Name,Importer ID,Importer Name,Routing Path,Hops,Sent (kW),Delivered (kW),Loss (kW),Efficiency (%),Cost Savings (INR),Cost Savings (USD),Status\n")
         for txn in trade_results["transactions"]:
             buffer.write(
                 f"{txn['Txn ID']},{txn['Exporter ID']},{txn['Exporter Name']},"
                 f"{txn['Importer ID']},{txn['Importer Name']},{txn['Routing Path']},"
                 f"{txn['Hops']},{txn['Sent (kW)']},{txn['Delivered (kW)']},"
-                f"{txn['Loss (kW)']},{txn['Efficiency (%)']},{txn['Cost Savings ($)']},"
-                f"{txn['Cost Savings (₹)']},{txn['Status']}\n"
+                f"{txn['Loss (kW)']},{txn['Efficiency (%)']},{txn['Cost Savings (₹)']},"
+                f"{txn['Cost Savings ($)']},{txn['Status']}\n"
             )
     else:
         buffer.write("Status,Message\n")
